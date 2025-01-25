@@ -1,9 +1,8 @@
 'use client'
 
 import React, { useState, useEffect } from 'react';
-import { Mail, Search, Calendar, Tag, Package, Heart, Star, Archive, Plus, X, Save, Wand2, Bell, Mic, MicOff } from 'lucide-react';
-import { validateContact, validateEvent } from '../utils/validation';
-import { checkUpcomingEvents } from '../utils/notifications';
+import { Mail, Search, Package, Star, Archive, Plus, X, Save, Wand2, Mic, MicOff } from 'lucide-react';
+import { validateContact } from '../utils/validation';
 import OpenAI from 'openai';
 
 const formatDate = (date: Date | string | undefined) => {
@@ -41,8 +40,8 @@ type SpeechRecognitionConstructor = new () => SpeechRecognition;
 
 declare global {
   interface Window {
-    SpeechRecognition: any;
-    webkitSpeechRecognition: any;
+      SpeechRecognition: SpeechRecognitionConstructor;
+      webkitSpeechRecognition: SpeechRecognitionConstructor;
   }
 }
 
@@ -52,7 +51,6 @@ interface Contact {
   group: string;
   email: string;
   phone: string;
-  nextEvent?: string;
   lastContact?: string | Date;
   address: {
     street: string;
@@ -62,15 +60,6 @@ interface Contact {
     zipCode: string;
     country: string;
   };
-  events: Array<{
-    id: number;
-    type: 'birthday' | 'anniversary' | 'holiday' | 'custom';
-    date: string;
-    recurring: boolean;
-    frequency: 'yearly' | 'monthly';
-    nextOccurrence?: Date;
-    description?: string;
-  }>;
 }
 
 interface EditFormProps {
@@ -78,49 +67,14 @@ interface EditFormProps {
   setEditingContact: (id: number | null) => void;
   setEditContact: (contact: Contact) => void;
   handleSaveEdit: () => void;
-  handleAddEvent: (id: number) => void;
 }
 
 const EditForm: React.FC<EditFormProps> = ({
   editContact,
   setEditingContact,
   setEditContact,
-  handleSaveEdit,
-  handleAddEvent
+  handleSaveEdit
 }: EditFormProps): JSX.Element => {
-  function calculateNextOccurrence(date: string, frequency: string): Date | undefined {
-    if (!date) return undefined;
-    
-    try {
-      const eventDate = new Date(date);
-      const today = new Date();
-      
-      // Return undefined if the date is invalid
-      if (isNaN(eventDate.getTime())) return undefined;
-      
-      // Clone the event date for calculations
-      let nextDate = new Date(eventDate);
-      
-      // If the date is in the future, return it as is
-      if (nextDate > today) return nextDate;
-      
-      // Calculate next occurrence based on frequency
-      if (frequency === 'yearly') {
-        while (nextDate <= today) {
-          nextDate.setFullYear(nextDate.getFullYear() + 1);
-        }
-      } else if (frequency === 'monthly') {
-        while (nextDate <= today) {
-          nextDate.setMonth(nextDate.getMonth() + 1);
-        }
-      }
-      
-      return nextDate;
-    } catch (error) {
-      console.error('Error calculating next occurrence:', error);
-      return undefined;
-    }
-  }
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[90vh] flex flex-col">
@@ -262,100 +216,6 @@ const EditForm: React.FC<EditFormProps> = ({
                 </div>
               </div>
             </section>
-
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">Important Dates</h3>
-                <button
-                  onClick={() => handleAddEvent(editContact.id)}
-                  className="flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Date
-                </button>
-              </div>
-              <div className="space-y-3">
-                {editContact.events?.map((event) => (
-                  <div 
-                    key={event.id} 
-                    className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg border"
-                  >
-                    <select
-                      value={event.type}
-                      onChange={(e) => {
-                        const updatedEvents = editContact.events.map(ev =>
-                          ev.id === event.id ? {...ev, type: e.target.value} : ev
-                        );
-                        setEditContact({...editContact, events: updatedEvents});
-                      }}
-                      className="p-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="birthday">Birthday</option>
-                      <option value="anniversary">Anniversary</option>
-                      <option value="holiday">Holiday</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                    <input
-                      type="date"
-                      value={event.date}
-                      onChange={(e) => {
-                        const updatedEvents = editContact.events.map(ev =>
-                          ev.id === event.id ? {
-                            ...ev,
-                            date: e.target.value,
-                            nextOccurrence: calculateNextOccurrence(e.target.value, ev.frequency)
-                          } : ev
-                        );
-                        setEditContact({...editContact, events: updatedEvents});
-                      }}
-                      className="p-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={event.recurring}
-                        onChange={(e) => {
-                          const updatedEvents = editContact.events.map(ev =>
-                            ev.id === event.id ? {...ev, recurring: e.target.checked} : ev
-                          );
-                          setEditContact({...editContact, events: updatedEvents});
-                        }}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-sm text-gray-600">Recurring</span>
-                    </label>
-                    {event.recurring && (
-                      <select
-                        value={event.frequency}
-                        onChange={(e) => {
-                          const updatedEvents = editContact.events.map(ev =>
-                            ev.id === event.id ? {
-                              ...ev,
-                              frequency: e.target.value,
-                              nextOccurrence: calculateNextOccurrence(ev.date, e.target.value)
-                            } : ev
-                          );
-                          setEditContact({...editContact, events: updatedEvents});
-                        }}
-                        className="p-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      >
-                        <option value="yearly">Yearly</option>
-                        <option value="monthly">Monthly</option>                      
-                        </select>
-                    )}
-                    <button
-                      onClick={() => {
-                        const updatedEvents = editContact.events.filter(ev => ev.id !== event.id);
-                        setEditContact({...editContact, events: updatedEvents});
-                      }}
-                      className="ml-auto text-gray-400 hover:text-red-600"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
           </div>
         </div>
 
@@ -382,8 +242,15 @@ const CardManager: React.FC = () => {
   const [activeView, setActiveView] = useState('dashboard');
   const [selectedContact, setSelectedContact] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+
+  const handleDeleteContact = (id: number) => {
+    setContacts(contacts.filter(contact => contact.id !== id));
+    if (selectedRecipient?.id === id) {
+      setSelectedRecipient(null);
+    }
+  };
   const [message, setMessage] = useState('');
-  const [selectedRecipient, setSelectedRecipient] = useState(null);
+  const [selectedRecipient, setSelectedRecipient] = useState<Contact | null>(null);
   const [isAddingContact, setIsAddingContact] = useState(false);
   const [newContact, setNewContact] = useState<Contact>({
     id: 0,
@@ -391,7 +258,6 @@ const CardManager: React.FC = () => {
     group: '',
     email: '',
     phone: '',
-    events: [],
     address: {
       street: '',
       unit: '',
@@ -407,9 +273,7 @@ const CardManager: React.FC = () => {
       id: 1,
       name: 'Sarah Johnson',
       group: 'Family',
-      nextEvent: 'Birthday - March 15',
       lastContact: formatDate(new Date('2024-01-01')), // Use a string date instead of Date object
-      events: [], // Add empty events array
       address: {
         street: '',
         unit: '',
@@ -425,9 +289,7 @@ const CardManager: React.FC = () => {
       id: 2,
       name: 'Mike Peters',
       group: 'Work',
-      nextEvent: 'Work Anniversary - April 1',
       lastContact: '1 week ago',
-      events: [],
       address: {
         street: '',
         unit: '',
@@ -443,9 +305,7 @@ const CardManager: React.FC = () => {
       id: 3,
       name: 'Emma Wilson',
       group: 'Friends',
-      nextEvent: 'Birthday - June 10',
       lastContact: '3 weeks ago',
-      events: [],
       address: {
         street: '',
         unit: '',
@@ -458,7 +318,22 @@ const CardManager: React.FC = () => {
       phone: ''
     }
   ]);
-  const [drafts, setDrafts] = useState([]);
+  interface Draft {
+    id: number;
+    recipient: string;
+    address?: {
+      street?: string;
+      city?: string;
+      state?: string;
+      zipCode?: string;
+      country?: string;
+    };
+    noteType: string;
+    note: string;
+    createdAt: string;
+  }
+
+  const [drafts, setDrafts] = useState<Draft[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [messagePrompt, setMessagePrompt] = useState({
     occasion: '',
@@ -481,25 +356,14 @@ const CardManager: React.FC = () => {
       state: '',
       zipCode: '',
       country: 'United States'
-    },
-    events: []
+    }
   });
 
-  const [events, setEvents] = useState([]);
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
-  const [notifications, setNotifications] = useState([]);
-
-  const [newEvent, setNewEvent] = useState({
-    type: 'birthday',
-    date: '',
-    recurring: true,
-    frequency: 'yearly',
-    description: ''
-  });
 
   const [isEditing, setIsEditing] = useState(false);
 
-  const [selectedCardSize, setSelectedCardSize] = useState('a2');
+  const [selectedCardSize, setSelectedCardSize] = useState<keyof typeof cardSizes>('a2');
   const [selectedFont, setSelectedFont] = useState('casual');
   
   const cardSizes = {
@@ -541,18 +405,6 @@ const CardManager: React.FC = () => {
   const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
 
   useEffect(() => {
-    const checkNotifications = () => {
-      const upcomingEvents = checkUpcomingEvents(contacts);
-      setNotifications(upcomingEvents);
-    };
-
-    checkNotifications();
-    const interval = setInterval(checkNotifications, 1000 * 60 * 60); // Check every hour
-
-    return () => clearInterval(interval);
-  }, [contacts]);
-
-  useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       
@@ -590,50 +442,6 @@ const CardManager: React.FC = () => {
     }
   }, []);
 
-  const handleAddEvent = (contactId: number | null) => {
-    if (!contactId) return;
-    
-    setContacts(contacts.map(contact => {
-      if (contact.id === contactId) {
-        const nextOccurrence = calculateNextOccurrence(newEvent.date, newEvent.frequency);
-        return {
-          ...contact,
-          events: [...(contact.events || []), {
-            ...newEvent,
-            id: Date.now(),
-            type: newEvent.type as "birthday" | "anniversary" | "holiday" | "custom",
-            frequency: newEvent.frequency as "yearly" | "monthly",
-            nextOccurrence
-          }]
-        };
-      }
-      return contact;
-    }));
-    
-    setNewEvent({
-      type: 'birthday',
-      date: '',
-      recurring: true,
-      frequency: 'yearly',
-      description: ''
-    });
-  };
-
-  const calculateNextOccurrence = (date, frequency) => {
-    const eventDate = new Date(date);
-    const today = new Date();
-    
-    while (eventDate < today) {
-      if (frequency === 'yearly') {
-        eventDate.setFullYear(eventDate.getFullYear() + 1);
-      } else if (frequency === 'monthly') {
-        eventDate.setMonth(eventDate.getMonth() + 1);
-      }
-    }
-    
-    return eventDate;
-  };
-
   const handleAddContact = () => {
     const errors = validateContact(newContact);
     if (errors.length > 0) {
@@ -665,7 +473,6 @@ const CardManager: React.FC = () => {
       group: '',
       email: '',
       phone: '',
-      events: [],
       address: {
         street: '',
         unit: '',
@@ -770,8 +577,7 @@ const CardManager: React.FC = () => {
         state: contact.address?.state || '',
         zipCode: contact.address?.zipCode || '',
         country: contact.address?.country || 'United States'
-      },
-      events: contact.events || []
+      }
     });
   };
 
@@ -796,7 +602,6 @@ const CardManager: React.FC = () => {
       email: '',
       phone: '',
       group: '',
-      events: [],
       address: {
         street: '',
         city: '',
@@ -822,51 +627,7 @@ const CardManager: React.FC = () => {
         setEditingContact={setEditingContact}
         setEditContact={setEditContact}
         handleSaveEdit={handleSaveEdit}
-        handleAddEvent={handleAddEvent}
       />
-    );
-  };
-
-  // Update the upcoming events rendering
-  const renderUpcomingEvents = () => {
-    const allEvents = contacts.flatMap(contact => 
-      contact.events?.map(event => ({
-        ...event,
-        contactName: contact.name,
-        contactId: contact.id,
-        nextOccurrence: event.nextOccurrence ? new Date(event.nextOccurrence) : null
-      })) || []
-    );
-
-    const sortedEvents = allEvents
-      .filter(event => event.nextOccurrence && event.nextOccurrence > new Date())
-      .sort((a, b) => a.nextOccurrence.getTime() - b.nextOccurrence.getTime());
-
-    return (
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-medium text-gray-900 mb-4">Upcoming Events</h2>
-        <div className="space-y-4">
-          {sortedEvents.map((event) => (
-            <div key={event.id} className="flex items-center justify-between p-3 border rounded-lg">
-              <div>
-                <div className="font-medium">{event.contactName}</div>
-                <div className="text-sm text-gray-500">
-                  {event.type} - {formatDate(event.nextOccurrence)}
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  setSelectedRecipient(contacts.find(c => c.id === event.contactId));
-                  setActiveView('dashboard');
-                }}
-                className="text-blue-600 hover:text-blue-700"
-              >
-                Send Card
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
     );
   };
 
@@ -924,24 +685,7 @@ const CardManager: React.FC = () => {
               }`}
             >
               <Archive className="w-5 h-5 mr-3" />
-              Sent Cards
-            </button>
-
-            <button 
-              onClick={() => setActiveView('upcoming')}
-              className={`flex items-center w-full p-2 rounded-lg ${
-                activeView === 'upcoming' 
-                  ? 'bg-blue-100 text-blue-700' 
-                  : 'text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              <Bell className="w-5 h-5 mr-3" />
-              Upcoming
-              {notifications.length > 0 && (
-                <span className="ml-auto bg-red-500 text-white text-xs px-2 py-1 rounded-full">
-                  {notifications.length}
-                </span>
-              )}
+              Draft Cards
             </button>
           </nav>
         </div>
@@ -970,9 +714,6 @@ const CardManager: React.FC = () => {
         </div>
 
         {/* View Content */}
-        {activeView === 'upcoming' && (
-          <div>{renderUpcomingEvents()}</div>
-        )}
 
         {activeView === 'sent' && (
           <div className="bg-white rounded-lg shadow">
@@ -1025,7 +766,6 @@ const CardManager: React.FC = () => {
                         group: '', 
                         email: '',
                         phone: '',
-                        events: [],
                         address: {
                           street: '',
                           unit: '',
@@ -1165,7 +905,6 @@ const CardManager: React.FC = () => {
                           group: '', 
                           email: '',
                           phone: '',
-                          events: [],
                           address: {
                             street: '',
                             unit: '',
@@ -1211,7 +950,6 @@ const CardManager: React.FC = () => {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">City</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">State</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Zip Code</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Next Event</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Contact</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                       </tr>
@@ -1225,20 +963,6 @@ const CardManager: React.FC = () => {
                           <td className="px-6 py-4 whitespace-nowrap">{contact.address?.city || '-'}</td>
                           <td className="px-6 py-4 whitespace-nowrap">{contact.address?.state || '-'}</td>
                           <td className="px-6 py-4 whitespace-nowrap">{contact.address?.zipCode || '-'}</td>
-                          <td className="px-6 py-4">
-                            <div className="space-y-2">
-                              {contact.events?.map(event => (
-                                <div key={event.id} className="text-sm">
-                                  <span className="font-medium">{event.type}</span>
-                                  <br />
-                                  <span className="text-gray-500">
-                                    {event.nextOccurrence ? formatDate(event.nextOccurrence) : '-'}
-                                    {event.recurring && ` (${event.frequency})`}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             {typeof contact.lastContact === 'object' 
                               ? formatDate(contact.lastContact) 
