@@ -69,6 +69,51 @@ interface EditFormProps {
   handleSaveEdit: () => void;
 }
 
+// Add new interfaces after the existing ones
+interface ThankYouItem {
+  id: string;
+  giftOrReason: string;
+  fromPerson: string;
+  occasion: string;
+  dateReceived: string;
+  status: 'pending' | 'generated' | 'finalized';
+  suggestedMessage?: string;
+  contact?: Contact;
+}
+
+interface BulkImportData {
+  items: {
+    giftOrReason: string;
+    fromPerson: string;
+    occasion?: string;
+    dateReceived?: string;
+  }[];
+}
+
+// Add new interface for message queue items
+interface QueuedMessage {
+  id: string;
+  recipient: Contact;
+  occasion?: string;
+  giftOrReason?: string;
+  suggestedMessage: string;
+  status: 'pending' | 'accepted' | 'editing';
+  dateCreated: string;
+}
+
+// Add button style constants near the top of the file
+const buttonStyles = {
+  primary: "bg-blue-600 hover:bg-blue-700 text-white",
+  success: "bg-green-600 hover:bg-green-700 text-white",
+  secondary: "bg-gray-200 hover:bg-gray-300 text-gray-800",
+  premium: "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white",
+  outline: "bg-white border border-gray-300 hover:bg-gray-50 text-gray-700",
+  ghost: "text-gray-600 hover:bg-gray-100",
+  destructive: "bg-red-600 hover:bg-red-700 text-white"
+};
+
+const baseButtonStyle = "px-4 py-2 rounded-lg transition-colors duration-200 flex items-center gap-2 disabled:opacity-50";
+
 const EditForm: React.FC<EditFormProps> = ({
   editContact,
   setEditingContact,
@@ -76,9 +121,9 @@ const EditForm: React.FC<EditFormProps> = ({
   handleSaveEdit
 }: EditFormProps): JSX.Element => {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div className="fixed inset-0 bg-neutral-900/50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[90vh] flex flex-col">
-        <div className="px-6 py-4 border-b flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-neutral-200 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
               <span className="text-blue-600 text-xl font-semibold">
@@ -222,13 +267,13 @@ const EditForm: React.FC<EditFormProps> = ({
         <div className="px-6 py-4 border-t bg-gray-50 flex justify-end gap-3">
           <button
             onClick={() => setEditingContact(null)}
-            className="px-4 py-2 text-gray-700 bg-white border rounded-md hover:bg-gray-50"
+            className={`${baseButtonStyle} ${buttonStyles.ghost}`}
           >
             Cancel
           </button>
           <button
             onClick={handleSaveEdit}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            className={`${baseButtonStyle} ${buttonStyles.primary}`}
           >
             Save Changes
           </button>
@@ -403,6 +448,16 @@ const CardManager: React.FC = () => {
 
   const [isListening, setIsListening] = useState(false);
   const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
+
+  // Add new state for bulk import
+  const [thankYouItems, setThankYouItems] = useState<ThankYouItem[]>([]);
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [bulkImportStep, setBulkImportStep] = useState(1);
+  const [importedData, setImportedData] = useState<BulkImportData>({ items: [] });
+
+  // Add new state for message queue
+  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
+  const [showMessageQueue, setShowMessageQueue] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -594,6 +649,39 @@ const CardManager: React.FC = () => {
       )
     );
 
+    // Update any drafts that reference this contact
+    setDrafts(prevDrafts => 
+      prevDrafts.map(draft => {
+        if (draft.recipient === editContact.name) {
+          return {
+            ...draft,
+            recipient: editContact.name,
+            address: {
+              street: editContact.address?.street || '',
+              city: editContact.address?.city || '',
+              state: editContact.address?.state || '',
+              zipCode: editContact.address?.zipCode || '',
+              country: editContact.address?.country || 'United States'
+            }
+          };
+        }
+        return draft;
+      })
+    );
+
+    // Update message queue items that reference this contact
+    setMessageQueue(prevQueue =>
+      prevQueue.map(item => {
+        if (item.recipient.id === editContact.id) {
+          return {
+            ...item,
+            recipient: editContact
+          };
+        }
+        return item;
+      })
+    );
+
     // Reset the editing state
     setEditingContact(null);
     setEditContact({
@@ -644,20 +732,177 @@ const CardManager: React.FC = () => {
     }
   };
 
+  // Add new functions for bulk import
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const csv = e.target?.result as string;
+        const lines = csv.split('\n');
+        const items = lines.slice(1).map((line) => {
+          const [giftOrReason, fromPerson, occasion, dateReceived] = line.split(',');
+          return { giftOrReason, fromPerson, occasion, dateReceived };
+        });
+        setImportedData({ items });
+        setBulkImportStep(2);
+      } catch (error) {
+        console.error('Error parsing CSV:', error);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const matchContacts = () => {
+    const newThankYouItems = importedData.items.map((item) => {
+      const matchedContact = contacts.find(
+        (contact) => contact.name.toLowerCase() === item.fromPerson.toLowerCase()
+      );
+      
+      return {
+        id: Math.random().toString(36).substr(2, 9),
+        ...item,
+        status: 'pending',
+        contact: matchedContact,
+      };
+    });
+
+    setThankYouItems(newThankYouItems);
+    setBulkImportStep(3);
+  };
+
+  const generateBulkMessages = async () => {
+    const updatedItems = await Promise.all(
+      thankYouItems.map(async (item) => {
+        if (item.status !== 'pending') return item;
+
+        const prompt = `Write a thank you card message for ${item.fromPerson} who gave/did: ${item.giftOrReason}${
+          item.occasion ? ` for ${item.occasion}` : ''
+        }. Make it personal and sincere.`;
+
+        try {
+          const completion = await openai.chat.completions.create({
+            messages: [{ role: "user", content: prompt }],
+            model: "gpt-3.5-turbo",
+          });
+
+          return {
+            ...item,
+            status: 'generated',
+            suggestedMessage: completion.choices[0].message.content || '',
+          };
+        } catch (error) {
+          console.error('Error generating message:', error);
+          return item;
+        }
+      })
+    );
+
+    setThankYouItems(updatedItems);
+    setBulkImportStep(4);
+  };
+
+  // Replace the existing finalizeAndSave function
+  const finalizeAndSave = () => {
+    const newQueueItems = thankYouItems
+      .filter((item) => item.status === 'generated' && item.suggestedMessage)
+      .map((item) => ({
+        id: Math.random().toString(36).substr(2, 9),
+        recipient: item.contact || {
+          id: Date.now(),
+          name: item.fromPerson,
+          group: 'Other',
+          email: '',
+          phone: '',
+          address: {
+            street: '',
+            city: '',
+            state: '',
+            zipCode: '',
+            country: 'United States'
+          }
+        },
+        occasion: item.occasion || 'Thank You',
+        giftOrReason: item.giftOrReason,
+        suggestedMessage: item.suggestedMessage!,
+        status: 'pending',
+        dateCreated: new Date().toISOString()
+      }));
+
+    setMessageQueue([...messageQueue, ...newQueueItems]);
+    setThankYouItems([]);
+    setShowBulkImport(false);
+    setBulkImportStep(1);
+    setShowMessageQueue(true); // Show the message queue after adding items
+  };
+
+  // Add new handlers for queue actions
+  const handleEditQueuedMessage = (queuedMessage: QueuedMessage) => {
+    setSelectedRecipient(queuedMessage.recipient);
+    setMessage(queuedMessage.suggestedMessage);
+    setMessagePrompt({
+      ...messagePrompt,
+      occasion: queuedMessage.occasion || '',
+    });
+    // Remove from queue
+    setMessageQueue(queue => queue.filter(item => item.id !== queuedMessage.id));
+    setShowMessageQueue(false);
+  };
+
+  const handleAcceptQueuedMessage = (queuedMessage: QueuedMessage) => {
+    // Move to drafts
+    const newDraft = {
+      id: Date.now(),
+      recipient: queuedMessage.recipient.name,
+      address: queuedMessage.recipient.address,
+      noteType: queuedMessage.occasion ? `Thank You - ${queuedMessage.occasion}` : 'Thank You Card',
+      note: queuedMessage.suggestedMessage,
+      createdAt: new Date().toISOString()
+    };
+    setDrafts([...drafts, newDraft]);
+    
+    // Remove from queue
+    setMessageQueue(queue => queue.filter(item => item.id !== queuedMessage.id));
+  };
+
+  const addToQueue = () => {
+    if (!selectedRecipient || !message) return;
+    
+    const newQueueItem: QueuedMessage = {
+      id: Math.random().toString(36).substr(2, 9),
+      recipient: selectedRecipient,
+      occasion: messagePrompt.occasion,
+      suggestedMessage: message,
+      status: 'pending',
+      dateCreated: new Date().toISOString()
+    };
+
+    setMessageQueue([...messageQueue, newQueueItem]);
+    
+    // Clear the form
+    setMessage('');
+    setSelectedRecipient(null);
+    setSearchTerm('');
+    setShowMessageQueue(true);
+  };
+
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-neutral-50">
       {/* Navigation */}
-      <div className="fixed top-0 left-0 h-screen w-64 bg-white border-r shadow-sm">
-        <div className="p-4">
-          <h1 className="text-xl font-bold text-gray-900 mb-8">Card Manager</h1>
+      <div className="fixed top-0 left-0 h-screen w-64 bg-neutral-50 border-r border-neutral-200 shadow-sm">
+        <div className="p-6">
+          <h1 className="font-heading text-2xl text-neutral-900 mb-8">Card Manager</h1>
           
-          <nav className="space-y-2">
+          <nav className="space-y-3">
+            {/* Update button styling to use warm neutrals */}
             <button 
               onClick={() => setActiveView('dashboard')}
-              className={`flex items-center w-full p-2 rounded-lg ${
+              className={`flex items-center w-full p-3 rounded-lg transition-colors duration-200 ${
                 activeView === 'dashboard' 
-                  ? 'bg-blue-100 text-blue-700' 
-                  : 'text-gray-700 hover:bg-gray-100'
+                  ? 'bg-primary-100 text-primary-700' 
+                  : 'text-neutral-700 hover:bg-neutral-100'
               }`}
             >
               <Star className="w-5 h-5 mr-3" />
@@ -666,10 +911,10 @@ const CardManager: React.FC = () => {
 
             <button 
               onClick={() => setActiveView('contacts')}
-              className={`flex items-center w-full p-2 rounded-lg ${
+              className={`flex items-center w-full p-3 rounded-lg transition-colors duration-200 ${
                 activeView === 'contacts' 
-                  ? 'bg-blue-100 text-blue-700' 
-                  : 'text-gray-700 hover:bg-gray-100'
+                  ? 'bg-primary-100 text-primary-700' 
+                  : 'text-neutral-700 hover:bg-neutral-100'
               }`}
             >
               <Mail className="w-5 h-5 mr-3" />
@@ -678,10 +923,10 @@ const CardManager: React.FC = () => {
 
             <button 
               onClick={() => setActiveView('sent')}
-              className={`flex items-center w-full p-2 rounded-lg ${
+              className={`flex items-center w-full p-3 rounded-lg transition-colors duration-200 ${
                 activeView === 'sent' 
-                  ? 'bg-blue-100 text-blue-700' 
-                  : 'text-gray-700 hover:bg-gray-100'
+                  ? 'bg-primary-100 text-primary-700' 
+                  : 'text-neutral-700 hover:bg-neutral-100'
               }`}
             >
               <Archive className="w-5 h-5 mr-3" />
@@ -692,47 +937,124 @@ const CardManager: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <div className="ml-64 p-8">
+      <div className="ml-64 p-8 bg-neutral-50 min-h-screen">
         {/* Header */}
         <div className="mb-8 flex justify-between items-center">
           <button 
             onClick={handleNewCard}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-sm"
+            className={`${baseButtonStyle} ${buttonStyles.primary}`}
           >
             <Package className="w-5 h-5" />
             New Card
           </button>
-          
-          <button
-            onClick={saveToDrafts}
-            disabled={!selectedRecipient || !message}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+
+          {/* Add bulk import button */}
+          <button 
+            onClick={() => setShowBulkImport(true)}
+            className={`${baseButtonStyle} ${buttonStyles.success}`}
           >
-            <Save className="w-4 h-4" />
-            Save to Drafts
+            <Package className="w-5 h-5" />
+            Bulk Import Thank You Cards
+          </button>
+
+          {/* Add queue button */}
+          <button 
+            onClick={() => setShowMessageQueue(true)}
+            className={`${baseButtonStyle} ${buttonStyles.secondary}`}
+          >
+            <Archive className="w-5 h-5" />
+            Message Queue ({messageQueue.length})
           </button>
         </div>
+
+        {/* Message Queue Panel */}
+        {showMessageQueue && (
+          <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-xl overflow-hidden z-40">
+            <div className="flex flex-col h-full">
+              <div className="px-6 py-4 border-b flex justify-between items-center">
+                <h3 className="text-lg font-medium">Message Queue</h3>
+                <button 
+                  onClick={() => setShowMessageQueue(false)}
+                  className="text-gray-400 hover:text-gray-500"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-6">
+                <div className="space-y-4">
+                  {messageQueue.map((item) => (
+                    <div key={item.id} className="border rounded-lg p-4 space-y-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h4 className="font-medium">{item.recipient.name}</h4>
+                          <p className="text-sm text-gray-500">
+                            {item.occasion || 'Thank You Card'}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleEditQueuedMessage(item)}
+                            className="text-blue-600 hover:text-blue-700 text-sm"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleAcceptQueuedMessage(item)}
+                            className="text-green-600 hover:text-green-700 text-sm"
+                          >
+                            Accept
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {item.giftOrReason && (
+                        <p className="text-sm text-gray-600">
+                          <span className="font-medium">Gift/Reason:</span> {item.giftOrReason}
+                        </p>
+                      )}
+                      
+                      <div className="bg-gray-50 p-3 rounded text-sm">
+                        {item.suggestedMessage}
+                      </div>
+                      
+                      <p className="text-xs text-gray-400">
+                        Created {new Date(item.dateCreated).toLocaleDateString()}
+                      </p>
+                    </div>
+                  ))}
+                  
+                  {messageQueue.length === 0 && (
+                    <div className="text-center text-gray-500 py-8">
+                      No messages in queue
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* View Content */}
 
         {activeView === 'sent' && (
           <div className="bg-white rounded-lg shadow">
             <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead>
-                  <tr className="bg-gray-50 border-b">
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Recipient</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Address</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">City</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">State</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Zip Code</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Note Type</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Note</th>
+              <table className="min-w-full divide-y divide-neutral-200">
+                <thead className="bg-neutral-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Recipient</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Address</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">City</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">State</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Zip Code</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Note Type</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Note</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200">
+                <tbody className="bg-white divide-y divide-neutral-200">
                   {drafts.map((draft) => (
-                    <tr key={draft.id} className="hover:bg-gray-50">
+                    <tr key={draft.id} className="hover:bg-neutral-50">
                       <td className="px-6 py-4 whitespace-nowrap">{draft.recipient}</td>
                       <td className="px-6 py-4 whitespace-nowrap">{draft.address?.street || '-'}</td>
                       <td className="px-6 py-4 whitespace-nowrap">{draft.address?.city || '-'}</td>
@@ -915,13 +1237,13 @@ const CardManager: React.FC = () => {
                           }
                         });
                       }}
-                      className="px-4 py-2 text-gray-600 bg-white border rounded-md hover:bg-gray-50"
+                      className={`${baseButtonStyle} ${buttonStyles.ghost}`}
                     >
                       Cancel
                     </button>
                     <button
                       onClick={handleAddContact}
-                      className="px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700"
+                      className={`${baseButtonStyle} ${buttonStyles.primary}`}
                     >
                       {isEditing ? 'Save Changes' : 'Add Contact'}
                     </button>
@@ -930,33 +1252,33 @@ const CardManager: React.FC = () => {
               </div>
             ) : (
               <div className="bg-white rounded-lg shadow">
-                <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <div className="px-6 py-4 border-b border-neutral-200 flex justify-between items-center">
                   <h2 className="text-lg font-medium text-gray-900">Contacts</h2>
                   <button
                     onClick={() => setIsAddingContact(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    className={`${baseButtonStyle} ${buttonStyles.primary}`}
                   >
                     <Plus className="w-4 h-4" />
                     Add New Contact
                   </button>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
+                  <table className="min-w-full divide-y divide-neutral-200">
+                    <thead className="bg-neutral-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Group</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Address</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">City</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">State</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Zip Code</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Contact</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Name</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Group</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Address</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">City</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">State</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Zip Code</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Last Contact</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
+                    <tbody className="bg-white divide-y divide-neutral-200">
                       {contacts.map(contact => (
-                        <tr key={contact.id} className="hover:bg-gray-50">
+                        <tr key={contact.id} className="hover:bg-neutral-50">
                           <td className="px-6 py-4 whitespace-nowrap">{contact.name}</td>
                           <td className="px-6 py-4 whitespace-nowrap">{contact.group}</td>
                           <td className="px-6 py-4 whitespace-nowrap">{contact.address?.street || '-'}</td>
@@ -968,29 +1290,33 @@ const CardManager: React.FC = () => {
                               ? formatDate(contact.lastContact) 
                               : contact.lastContact}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap space-x-2">
-                            <button
-                              onClick={() => handleEditContact(contact)}
-                              className="text-blue-600 hover:text-blue-900"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDeleteContact(contact.id)}
-                              className="text-red-600 hover:text-red-900"
-                            >
-                              Delete
-                            </button>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleEditContact(contact)}
+                                className={`${baseButtonStyle} !py-1 !px-3 text-sm`}
+                              >
+                                <Mail className="w-4 h-4 mr-1" />
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteContact(contact.id)}
+                                className={`${baseButtonStyle} !py-1 !px-3 text-sm ${buttonStyles.destructive}`}
+                              >
+                                <X className="w-4 h-4 mr-1" />
+                                Delete
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                <div className="px-6 py-4 border-t border-gray-200">
+                <div className="px-6 py-4 border-t border-neutral-200">
                   <button
                     onClick={() => setIsAddingContact(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    className={`${baseButtonStyle} ${buttonStyles.primary}`}
                   >
                     <Plus className="w-4 h-4" />
                     Add New Contact
@@ -1032,8 +1358,8 @@ const CardManager: React.FC = () => {
                                 setSelectedRecipient(contact);
                                 setSearchTerm('');
                               }}
-                              className={`p-2 cursor-pointer hover:bg-gray-50 ${
-                                selectedRecipient?.id === contact.id ? 'bg-blue-50' : ''
+                              className={`p-2 cursor-pointer hover:bg-neutral-50 ${
+                                selectedRecipient?.id === contact.id ? 'bg-primary-50' : ''
                               }`}
                             >
                               <div className="font-medium">{contact.name}</div>
@@ -1045,14 +1371,14 @@ const CardManager: React.FC = () => {
                     )}
                     <div className="flex items-center gap-2">
                       {selectedRecipient && (
-                        <div className="flex-1 p-2 bg-blue-50 rounded-lg">
-                          <div className="font-medium text-blue-700">{selectedRecipient.name}</div>
-                          <div className="text-sm text-blue-600">{selectedRecipient.group}</div>
+                        <div className="flex-1 p-2 bg-primary-50 rounded-lg">
+                          <div className="font-medium text-primary-700">{selectedRecipient.name}</div>
+                          <div className="text-sm text-primary-600">{selectedRecipient.group}</div>
                         </div>
                       )}
                       <button
                         onClick={() => setIsAddingContact(true)}
-                        className="text-blue-600 text-sm flex items-center gap-1 hover:text-blue-700"
+                        className="text-primary-600 text-sm flex items-center gap-1 hover:text-primary-700"
                       >
                         <Plus className="w-4 h-4" /> Add New Contact
                       </button>
@@ -1170,13 +1496,13 @@ const CardManager: React.FC = () => {
                     <div className="flex justify-end gap-2 mt-4">
                       <button
                         onClick={() => setIsAddingContact(false)}
-                        className="px-4 py-2 text-gray-600 hover:text-gray-700"
+                        className={`${baseButtonStyle} ${buttonStyles.ghost}`}
                       >
                         Cancel
                       </button>
                       <button
                         onClick={handleAddContact}
-                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                        className={`${baseButtonStyle} ${buttonStyles.primary}`}
                       >
                         {isEditing ? 'Save Changes' : 'Add Contact'}
                       </button>
@@ -1190,7 +1516,7 @@ const CardManager: React.FC = () => {
                   <label className="block text-sm font-medium text-gray-900">Message</label>
                   <button
                     onClick={() => setShowPromptForm(true)}
-                    className="text-blue-600 text-sm flex items-center gap-1 hover:text-blue-700"
+                    className={`${baseButtonStyle} ${buttonStyles.premium} !p-2`}
                   >
                     <Wand2 className="w-4 h-4" /> {message ? 'Improve with AI' : 'AI Assist'}
                   </button>
@@ -1240,7 +1566,7 @@ const CardManager: React.FC = () => {
                     <button
                       onClick={generateMessage}
                       disabled={isGenerating}
-                      className="w-full py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                      className="w-full py-2 bg-primary-500 text-white rounded hover:bg-primary-600 disabled:opacity-50"
                     >
                       {isGenerating ? 'Generating...' : message ? 'Regenerate Message' : 'Generate Message'}
                     </button>
@@ -1260,37 +1586,61 @@ const CardManager: React.FC = () => {
                       className={`absolute right-3 top-3 p-2 rounded-full ${
                         isListening 
                           ? 'bg-red-100 text-red-600 hover:bg-red-200' 
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
                       }`}
                       title={isListening ? 'Stop recording' : 'Start recording'}
                     >
                       {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                     </button>
                   </div>
-                  <div className="flex justify-between items-center text-sm text-gray-700">
-                    <div className="flex items-center gap-2">
-                      <span>{message.length} characters</span>
-                      {isListening && (
-                        <span className="text-red-600 animate-pulse">
-                          ● Recording...
-                        </span>
+
+                  {/* Message controls */}
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center text-sm text-gray-700">
+                      <div className="flex items-center gap-2">
+                        <span>{message.length} characters</span>
+                        {isListening && (
+                          <span className="text-red-600 animate-pulse">
+                            ● Recording...
+                          </span>
+                        )}
+                      </div>
+                      {message && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => improveExistingMessage('Make it more concise')}
+                            className="text-primary-600 hover:text-primary-700"
+                            disabled={isGenerating}
+                          >
+                            Make Shorter
+                          </button>
+                          <button
+                            onClick={() => improveExistingMessage('Make it more detailed and expressive')}
+                            className="text-primary-600 hover:text-primary-700"
+                            disabled={isGenerating}
+                          >
+                            Make Longer
+                          </button>
+                        </div>
                       )}
                     </div>
-                    {message && (
-                      <div className="flex gap-2">
+
+                    {/* Action buttons - Add this section */}
+                    {selectedRecipient && message && (
+                      <div className="flex gap-3">
                         <button
-                          onClick={() => improveExistingMessage('Make it more concise')}
-                          className="text-blue-600 hover:text-blue-700"
-                          disabled={isGenerating}
+                          onClick={saveToDrafts}
+                          className={`${baseButtonStyle} ${buttonStyles.success} flex-1`}
                         >
-                          Make Shorter
+                          <Save className="w-4 h-4" />
+                          Save to Drafts
                         </button>
                         <button
-                          onClick={() => improveExistingMessage('Make it more detailed and expressive')}
-                          className="text-blue-600 hover:text-blue-700"
-                          disabled={isGenerating}
+                          onClick={addToQueue}
+                          className={`${baseButtonStyle} ${buttonStyles.primary} flex-1`}
                         >
-                          Make Longer
+                          <Archive className="w-4 h-4" />
+                          Add to Review Queue
                         </button>
                       </div>
                     )}
@@ -1304,42 +1654,44 @@ const CardManager: React.FC = () => {
               <div className="flex justify-between items-center mb-6">
                 <div className="flex items-center gap-4">
                   <h3 className="text-sm font-medium text-gray-900">Preview</h3>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-600">Font:</span>
-                    <select
-                      value={selectedFont}
-                      onChange={(e) => setSelectedFont(e.target.value)}
-                      className="text-sm border rounded p-1 bg-white"
-                    >
-                      {Object.entries(handwritingFonts).map(([key, font]) => (
-                        <option key={key} value={key}>
-                          {font.name}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600">Font:</span>
+                      <select
+                        value={selectedFont}
+                        onChange={(e) => setSelectedFont(e.target.value)}
+                        className="text-sm border rounded p-1 bg-white min-w-[160px]"
+                      >
+                        {Object.entries(handwritingFonts).map(([key, font]) => (
+                          <option key={key} value={key}>
+                            {font.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600">Size:</span>
+                      <select
+                        value={selectedCardSize}
+                        onChange={(e) => setSelectedCardSize(e.target.value as keyof typeof cardSizes)}
+                        className="text-sm border rounded p-1 bg-white min-w-[120px]"
+                      >
+                        {Object.entries(cardSizes).map(([size, details]) => (
+                          <option key={size} value={size}>
+                            {details.displaySize}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                </div>
-                <div className="flex gap-2">
-                  {Object.entries(cardSizes).map(([size, details]) => (
-                    <button
-                      key={size}
-                      onClick={() => setSelectedCardSize(size)}
-                      className={`px-3 py-1 text-sm rounded ${
-                        selectedCardSize === size
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                    >
-                      {details.name}
-                    </button>
-                  ))}
                 </div>
               </div>
               
-              <div className="relative bg-gray-50 p-8 rounded-lg">
-                <div className={`bg-white rounded-lg shadow-lg border mx-auto ${cardSizes[selectedCardSize].aspect}`}>
+              <div className="relative bg-neutral-50 p-8 rounded-lg">
+                <div className={`bg-white rounded-lg shadow-lg border border-neutral-300 mx-auto 
+                                ${cardSizes[selectedCardSize].aspect} shadow-md`}>
                   <div className="p-8 h-full">
-                    <div className={`text-gray-900 w-full h-full whitespace-pre-wrap text-left overflow-y-auto
+                    <div className={`text-neutral-800 w-full h-full whitespace-pre-wrap text-left overflow-y-auto
                       ${handwritingFonts[selectedFont].class} 
                       ${cardSizes[selectedCardSize].fontSize}
                       leading-relaxed`}
@@ -1362,6 +1714,142 @@ const CardManager: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Bulk Import Modal */}
+      {showBulkImport && (
+        <div className="fixed inset-0 bg-neutral-900/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-neutral-200">
+              <h2 className="font-heading text-xl text-neutral-900">Bulk Import Thank You Cards</h2>
+              <p className="text-sm text-gray-500">Step {bulkImportStep} of 4</p>
+            </div>
+
+            <div className="p-6 overflow-y-auto">
+              {bulkImportStep === 1 && (
+                <div className="space-y-4">
+                  <p>Upload a CSV file with the following columns:</p>
+                  <ul className="list-disc pl-5">
+                    <li>Gift or Reason for Thanks</li>
+                    <li>From Person</li>
+                    <li>Occasion (optional)</li>
+                    <li>Date Received (optional)</li>
+                  </ul>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleFileUpload}
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
+                  />
+                </div>
+              )}
+
+              {bulkImportStep === 2 && (
+                <div className="space-y-4">
+                  <p>Review imported data and match with contacts:</p>
+                  <div className="max-h-96 overflow-y-auto">
+                    {importedData.items.map((item, index) => (
+                      <div key={index} className="p-4 border rounded mb-2">
+                        <p><strong>From:</strong> {item.fromPerson}</p>
+                        <p><strong>Gift/Reason:</strong> {item.giftOrReason}</p>
+                        {item.occasion && <p><strong>Occasion:</strong> {item.occasion}</p>}
+                        {item.dateReceived && <p><strong>Date:</strong> {item.dateReceived}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {bulkImportStep === 3 && (
+                <div className="space-y-4">
+                  <p>Review contact matches and generate messages:</p>
+                  <div className="max-h-96 overflow-y-auto">
+                    {thankYouItems.map((item) => (
+                      <div key={item.id} className="p-4 border rounded mb-2">
+                        <p><strong>To:</strong> {item.fromPerson}</p>
+                        <p><strong>Contact Found:</strong> {item.contact ? '✓' : '✗'}</p>
+                        <p><strong>Gift/Reason:</strong> {item.giftOrReason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {bulkImportStep === 4 && (
+                <div className="space-y-4">
+                  <p>Review messages before adding to queue:</p>
+                  <div className="max-h-96 overflow-y-auto">
+                    {thankYouItems.map((item) => (
+                      <div key={item.id} className="p-4 border rounded mb-2">
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <p><strong>To:</strong> {item.fromPerson}</p>
+                            <p><strong>Gift/Reason:</strong> {item.giftOrReason}</p>
+                            {item.occasion && <p><strong>Occasion:</strong> {item.occasion}</p>}
+                          </div>
+                          <span className={`px-2 py-1 rounded text-sm ${
+                            item.contact ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                          }`}>
+                            {item.contact ? 'Contact Matched' : 'New Contact'}
+                          </span>
+                        </div>
+                        <div className="mt-3 p-3 bg-neutral-50 rounded whitespace-pre-wrap">
+                          {item.suggestedMessage}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t bg-neutral-50 flex justify-between">
+              <button
+                onClick={() => {
+                  setShowBulkImport(false);
+                  setBulkImportStep(1);
+                }}
+                className={`${baseButtonStyle} ${buttonStyles.ghost}`}
+              >
+                Cancel
+              </button>
+              <div className="space-x-2">
+                {bulkImportStep > 1 && (
+                  <button
+                    onClick={() => setBulkImportStep(step => step - 1)}
+                    className={`${baseButtonStyle} ${buttonStyles.outline}`}
+                  >
+                    Back
+                  </button>
+                )}
+                {bulkImportStep === 2 && (
+                  <button
+                    onClick={matchContacts}
+                    className={`${baseButtonStyle} ${buttonStyles.primary}`}
+                  >
+                    Match Contacts
+                  </button>
+                )}
+                {bulkImportStep === 3 && (
+                  <button
+                    onClick={generateBulkMessages}
+                    className={`${baseButtonStyle} ${buttonStyles.primary}`}
+                  >
+                    Generate Messages
+                  </button>
+                )}
+                {bulkImportStep === 4 && (
+                  <button
+                    onClick={finalizeAndSave}
+                    className={`${baseButtonStyle} ${buttonStyles.success}`}
+                  >
+                    Add to Message Queue
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {editingContact && renderEditForm()}
     </div>
   );
