@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  fullName  String
+  email     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  notes     Note[]
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  type      String
+  occasion  String
+  content   String
+  details   String?
+  status    String   @default("draft") // draft, sent
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  contactId String
+  contact   Contact  @relation(fields: [contactId], references: [id])
+}
+
