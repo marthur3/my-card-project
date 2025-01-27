@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --primary: 242 47% 34%;
+    --primary-foreground: 0 0% 98%;
+  }
+}
+
 :root {
   --foreground-rgb: 0, 0, 0;
   --background-rgb: 255, 255, 255;
@@ -19,6 +28,30 @@ body {
   }
 }
 
+@keyframes pulse {
+  0%, 100% { opacity: 0.1; }
+  50% { opacity: 0.2; }
+}
+
+.animate-pulse {
+  animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes scale {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.02); }
+}
+
+.hover\:scale-102:hover {
+  transform: scale(1.02);
+}
+
+.transition-all {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
+}
+
 @layer utilities {
   .animation-delay-2000 {
     animation-delay: 2s;
@@ -26,4 +59,52 @@ body {
   .animation-delay-4000 {
     animation-delay: 4s;
   }
+}
+
+/* Add smooth transition for text placeholder */
+.text-transparent {
+  transition: opacity 0.3s ease;
+}
+
+/* Add subtle gradient animation */
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.bg-gradient-animate {
+  background-size: 200% 200%;
+  animation: gradient-shift 15s ease infinite;
+}
+
+/* Improve focus styles */
+:focus-visible {
+  outline: 2px solid theme('colors.violet.500');
+  outline-offset: 2px;
+}
+
+/* Add smooth transitions for interactive elements */
+button, input, select, textarea {
+  transition: all 0.2s ease;
+}
+
+/* Add better scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: theme('colors.neutral.100');
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: theme('colors.neutral.300');
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: theme('colors.neutral.400');
 }

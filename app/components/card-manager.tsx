@@ -1,9 +1,10 @@
 'use client'
 
 import React, { useState, useEffect } from 'react';
-import { Mail, Search, Package, Star, Archive, Plus, X, Save, Wand2, Mic, MicOff } from 'lucide-react';
+import { Mail, Search, Package, Star, Archive, Plus, X, Save, Wand2, Mic, MicOff, Sparkles } from 'lucide-react';
 import { validateContact } from '../utils/validation';
 import OpenAI from 'openai';
+import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 
 const formatDate = (date: Date | string | undefined) => {
   if (!date) return '-';
@@ -29,22 +30,6 @@ interface ValidationError {
   message: string;
 }
 // Global type declarations
-interface SpeechRecognition extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  start(): void;
-  stop(): void;
-}
-
-type SpeechRecognitionConstructor = new () => SpeechRecognition;
-
-declare global {
-  interface Window {
-      SpeechRecognition: SpeechRecognitionConstructor;
-      webkitSpeechRecognition: SpeechRecognitionConstructor;
-  }
-}
-
 interface Contact {
   id: number;
   name: string;
@@ -106,13 +91,36 @@ const buttonStyles = {
   primary: "bg-blue-600 hover:bg-blue-700 text-white",
   success: "bg-green-600 hover:bg-green-700 text-white",
   secondary: "bg-gray-200 hover:bg-gray-300 text-gray-800",
-  premium: "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white",
+  premium: `bg-gradient-to-r from-violet-500 to-indigo-500 
+    hover:from-violet-600 hover:to-indigo-600 
+    text-white transition-all duration-200 
+    hover:shadow-lg transform hover:scale-102`,
   outline: "bg-white border border-gray-300 hover:bg-gray-50 text-gray-700",
   ghost: "text-gray-600 hover:bg-gray-100",
-  destructive: "bg-red-600 hover:bg-red-700 text-white"
+  destructive: "bg-red-600 hover:bg-red-700 text-white",
+  glass: `bg-white/80 backdrop-blur-sm 
+    border border-gray-200/50
+    hover:bg-white/90 hover:shadow-md
+    transition-all duration-200`,
+  tab: `relative px-4 py-2 text-sm font-medium transition-all duration-200
+    after:absolute after:bottom-0 after:left-0 after:h-0.5 after:w-full
+    after:scale-x-0 after:bg-violet-600 after:transition-transform
+    hover:after:scale-x-100`,
 };
 
 const baseButtonStyle = "px-4 py-2 rounded-lg transition-colors duration-200 flex items-center gap-2 disabled:opacity-50";
+
+const navStyles = {
+  tab: `flex items-center w-full p-3 rounded-lg transition-all duration-200
+    font-medium text-sm gap-3`,
+  active: `bg-gradient-to-r from-violet-500/10 to-indigo-500/10 
+    text-violet-700 shadow-sm`,
+  inactive: `text-neutral-600 hover:bg-neutral-100`,
+};
+
+const brandBadge = `absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 
+  bg-gradient-to-r from-violet-500/10 to-indigo-500/10 
+  border border-violet-500/20 rounded-full`;
 
 const EditForm: React.FC<EditFormProps> = ({
   editContact,
@@ -409,7 +417,7 @@ const CardManager: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
 
   const [selectedCardSize, setSelectedCardSize] = useState<keyof typeof cardSizes>('a2');
-  const [selectedFont, setSelectedFont] = useState('casual');
+  const [selectedFont, setSelectedFont] = useState<keyof typeof handwritingFonts>('casual');
   
   const cardSizes = {
     'a2': {
@@ -447,7 +455,7 @@ const CardManager: React.FC = () => {
   };
 
   const [isListening, setIsListening] = useState(false);
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
+  const [recognition, setRecognition] = useState<any | null>(null);
 
   // Add new state for bulk import
   const [thankYouItems, setThankYouItems] = useState<ThankYouItem[]>([]);
@@ -579,47 +587,59 @@ const CardManager: React.FC = () => {
     setActiveView('dashboard');
   };
 
-  const generateMessage = async () => {
-    setIsGenerating(true);
-    try {
-      const prompt = message 
-        ? `Rewrite this message: "${message}"
-           Make it more ${messagePrompt.tone} and suitable for a ${messagePrompt.occasion} card to a ${messagePrompt.relationship}.
-           Additional context: ${messagePrompt.specificDetails}`
-        : `Write a ${messagePrompt.tone} message for a ${messagePrompt.occasion} card to a ${messagePrompt.relationship}. 
-           Additional details: ${messagePrompt.specificDetails}`;
+const generateMessage = async () => {
+  setIsGenerating(true);
+  try {
+    const prompt = message 
+      ? `Rewrite this message: "${message}"
+         Make it more ${messagePrompt.tone} and suitable for a ${messagePrompt.occasion} card to a ${messagePrompt.relationship}.
+         Additional context: ${messagePrompt.specificDetails}`
+      : `Write a ${messagePrompt.tone} message for a ${messagePrompt.occasion} card to a ${messagePrompt.relationship}. 
+         Additional details: ${messagePrompt.specificDetails}`;
 
-      const completion = await openai.chat.completions.create({
-        messages: [{ role: "user", content: prompt }],
-        model: "gpt-3.5-turbo",
-      });
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prompt }),
+    });
 
-      setMessage(completion.choices[0].message.content || '');
-    } catch (error) {
-      console.error('Error generating message:', error);
-    }
-    setIsGenerating(false);
-    setShowPromptForm(false);
-  };
+    const data = await response.json();
+    if (data.error) throw new Error(data.error);
+    
+    setMessage(data.message || '');
+  } catch (error) {
+    console.error('Error generating message:', error);
+  }
+  setIsGenerating(false);
+  setShowPromptForm(false);
+};
 
-  const improveExistingMessage = async (instruction: string) => {
-    setIsGenerating(true);
-    try {
-      const prompt = `Improve this card message: "${message}" 
-        Instructions: ${instruction}
-        Make it more ${messagePrompt.tone}`;
+const improveExistingMessage = async (instruction: string) => {
+  setIsGenerating(true);
+  try {
+    const prompt = `Improve this card message: "${message}" 
+      Instructions: ${instruction}
+      Make it more ${messagePrompt.tone}`;
 
-      const completion = await openai.chat.completions.create({
-        messages: [{ role: "user", content: prompt }],
-        model: "gpt-3.5-turbo",
-      });
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prompt }),
+    });
 
-      setMessage(completion.choices[0].message.content || '');
-    } catch (error) {
-      console.error('Error improving message:', error);
-    }
-    setIsGenerating(false);
-  };
+    const data = await response.json();
+    if (data.error) throw new Error(data.error);
+    
+    setMessage(data.message || '');
+  } catch (error) {
+    console.error('Error improving message:', error);
+  }
+  setIsGenerating(false);
+};
 
   const handleEditContact = (contact: Contact) => {
     setEditingContact(contact.id);
@@ -721,7 +741,7 @@ const CardManager: React.FC = () => {
 
   const toggleListening = () => {
     if (isListening) {
-      recognition?.stop();
+      (recognition as any)?.stop();
     } else {
       try {
         recognition?.start();
@@ -763,8 +783,11 @@ const CardManager: React.FC = () => {
       
       return {
         id: Math.random().toString(36).substr(2, 9),
-        ...item,
-        status: 'pending',
+        giftOrReason: item.giftOrReason,
+        fromPerson: item.fromPerson,
+        occasion: item.occasion || 'General',
+        dateReceived: item.dateReceived || new Date().toISOString(),
+        status: 'pending' as const,
         contact: matchedContact,
       };
     });
@@ -783,15 +806,21 @@ const CardManager: React.FC = () => {
         }. Make it personal and sincere.`;
 
         try {
-          const completion = await openai.chat.completions.create({
-            messages: [{ role: "user", content: prompt }],
-            model: "gpt-3.5-turbo",
+          const response = await fetch('/api/generate', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ prompt }),
           });
 
+          const data = await response.json();
+          if (data.error) throw new Error(data.error);
+          
           return {
             ...item,
-            status: 'generated',
-            suggestedMessage: completion.choices[0].message.content || '',
+            status: 'generated' as const,
+            suggestedMessage: data.message || '',
           };
         } catch (error) {
           console.error('Error generating message:', error);
@@ -806,7 +835,7 @@ const CardManager: React.FC = () => {
 
   // Replace the existing finalizeAndSave function
   const finalizeAndSave = () => {
-    const newQueueItems = thankYouItems
+    const newQueueItems: QueuedMessage[] = thankYouItems
       .filter((item) => item.status === 'generated' && item.suggestedMessage)
       .map((item) => ({
         id: Math.random().toString(36).substr(2, 9),
@@ -827,7 +856,7 @@ const CardManager: React.FC = () => {
         occasion: item.occasion || 'Thank You',
         giftOrReason: item.giftOrReason,
         suggestedMessage: item.suggestedMessage!,
-        status: 'pending',
+        status: 'pending' as const,
         dateCreated: new Date().toISOString()
       }));
 
@@ -891,45 +920,46 @@ const CardManager: React.FC = () => {
   return (
     <div className="min-h-screen bg-neutral-50">
       {/* Navigation */}
-      <div className="fixed top-0 left-0 h-screen w-64 bg-neutral-50 border-r border-neutral-200 shadow-sm">
-        <div className="p-6">
-          <h1 className="font-heading text-2xl text-neutral-900 mb-8">Card Manager</h1>
+      <div className="fixed top-0 left-0 h-screen w-64 bg-white border-r border-neutral-200 shadow-sm">
+        <div className="p-6 relative">
+          <h1 className="font-heading text-2xl text-neutral-900 mb-2">Card Manager</h1>
+          <p className="text-sm text-neutral-500 mb-8">Manage your cards and contacts</p>
           
-          <nav className="space-y-3">
-            {/* Update button styling to use warm neutrals */}
+          <div className={brandBadge}>
+            <Sparkles className="w-4 h-4 text-violet-500" />
+            <span className="text-xs font-medium bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+              Pro
+            </span>
+          </div>
+
+          <nav className="space-y-1">
             <button 
               onClick={() => setActiveView('dashboard')}
-              className={`flex items-center w-full p-3 rounded-lg transition-colors duration-200 ${
-                activeView === 'dashboard' 
-                  ? 'bg-primary-100 text-primary-700' 
-                  : 'text-neutral-700 hover:bg-neutral-100'
+              className={`${navStyles.tab} ${
+                activeView === 'dashboard' ? navStyles.active : navStyles.inactive
               }`}
             >
-              <Star className="w-5 h-5 mr-3" />
+              <Star className="w-5 h-5" />
               Dashboard
             </button>
 
             <button 
               onClick={() => setActiveView('contacts')}
-              className={`flex items-center w-full p-3 rounded-lg transition-colors duration-200 ${
-                activeView === 'contacts' 
-                  ? 'bg-primary-100 text-primary-700' 
-                  : 'text-neutral-700 hover:bg-neutral-100'
+              className={`${navStyles.tab} ${
+                activeView === 'contacts' ? navStyles.active : navStyles.inactive
               }`}
             >
-              <Mail className="w-5 h-5 mr-3" />
+              <Mail className="w-5 h-5" />
               Contacts
             </button>
 
             <button 
               onClick={() => setActiveView('sent')}
-              className={`flex items-center w-full p-3 rounded-lg transition-colors duration-200 ${
-                activeView === 'sent' 
-                  ? 'bg-primary-100 text-primary-700' 
-                  : 'text-neutral-700 hover:bg-neutral-100'
+              className={`${navStyles.tab} ${
+                activeView === 'sent' ? navStyles.active : navStyles.inactive
               }`}
             >
-              <Archive className="w-5 h-5 mr-3" />
+              <Archive className="w-5 h-5" />
               Draft Cards
             </button>
           </nav>
@@ -1659,7 +1689,7 @@ const CardManager: React.FC = () => {
                       <span className="text-sm text-gray-600">Font:</span>
                       <select
                         value={selectedFont}
-                        onChange={(e) => setSelectedFont(e.target.value)}
+                        onChange={(e) => setSelectedFont(e.target.value as keyof typeof handwritingFonts)}
                         className="text-sm border rounded p-1 bg-white min-w-[160px]"
                       >
                         {Object.entries(handwritingFonts).map(([key, font]) => (
@@ -1687,23 +1717,44 @@ const CardManager: React.FC = () => {
                 </div>
               </div>
               
-              <div className="relative bg-neutral-50 p-8 rounded-lg">
-                <div className={`bg-white rounded-lg shadow-lg border border-neutral-300 mx-auto 
-                                ${cardSizes[selectedCardSize].aspect} shadow-md`}>
-                  <div className="p-8 h-full">
-                    <div className={`text-neutral-800 w-full h-full whitespace-pre-wrap text-left overflow-y-auto
+              <div className="relative bg-gradient-to-br from-gray-50 via-white to-gray-50 p-8 rounded-lg">
+                <div className={`
+                  bg-white/80 backdrop-blur-sm
+                  border border-gray-200/50
+                  rounded-lg shadow-md
+                  transition-all duration-300
+                  hover:shadow-lg hover:scale-102
+                  mx-auto overflow-hidden
+                  ${cardSizes[selectedCardSize].aspect}
+                `}>
+                  <div className="p-8 h-full relative">
+                    <div className={`
+                      text-neutral-800 w-full h-full 
+                      whitespace-pre-wrap text-left
                       ${handwritingFonts[selectedFont].class} 
                       ${cardSizes[selectedCardSize].fontSize}
-                      leading-relaxed`}
-                    >
-                      {message || "Your message will appear here"}
+                      leading-relaxed
+                      bg-gradient-to-r from-gray-700 to-gray-800 
+                      bg-clip-text text-transparent
+                      transition-opacity duration-300
+                    `}>
+                      {message || (
+                        <span className="opacity-40 select-none">
+                          Your message will appear here...
+                          <br />
+                          Start typing or use AI assistance to generate a message.
+                        </span>
+                      )}
+                    </div>
+                    <div className="absolute inset-0 pointer-events-none">
+                      <div className="w-full h-full bg-[radial-gradient(circle_at_top_right,rgba(75,85,99,0.05),transparent_40%)]" />
                     </div>
                   </div>
                 </div>
 
                 <div className="mt-4 text-center">
-                  <p className="text-sm text-gray-600">
-                    Card Size: {cardSizes[selectedCardSize].displaySize}
+                  <p className="text-sm text-gray-700 font-medium">
+                    {cardSizes[selectedCardSize].displaySize}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
                     Writing surface shown at actual proportions
@@ -1838,9 +1889,9 @@ const CardManager: React.FC = () => {
                   </button>
                 )}
                 {bulkImportStep === 4 && (
-                  <button
-                    onClick={finalizeAndSave}
-                    className={`${baseButtonStyle} ${buttonStyles.success}`}
+      <button
+        onClick={finalizeAndSave}
+        className={`${baseButtonStyle} ${buttonStyles.success}`}
                   >
                     Add to Message Queue
                   </button>

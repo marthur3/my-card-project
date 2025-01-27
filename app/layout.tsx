@@ -32,16 +32,16 @@ const caveat = Caveat({
 
 export const metadata: Metadata = {
   title: "Note Generator",
-  description: "Generate personalized notes with AI",
+  description: "Generate thoughtful, personalized notes for any occasion",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="en" className={inter.className}>
+    <html lang="en">
       <body className={`${homemadeApple.variable} ${nothingYouCouldDo.variable} ${alexBrush.variable} ${caveat.variable}`}>
         {children}
       </body>
