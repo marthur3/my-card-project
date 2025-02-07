@@ -12,6 +12,7 @@ module.exports = {
         'nothing-you-could-do': ['Nothing You Could Do', 'cursive'],
         'alex-brush': ['Alex Brush', 'cursive'],
         'caveat': ['Caveat', 'cursive'],
+        'cursive': ['cursive'],
       },
       borderColor: {
         border: 'var(--border)',
@@ -24,6 +25,13 @@ module.exports = {
       },
     },
   },
+  safelist: [
+    'font-homemade-apple',
+    'font-nothing-you-could-do',
+    'font-alex-brush',
+    'font-caveat',
+    'font-cursive'
+  ],
   plugins: [
     require('tailwindcss-animate'),
   ],

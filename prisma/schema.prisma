@@ -3,30 +3,81 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String              @id @default(cuid())
+  email        String              @unique
+  name         String?
+  password     String
+  credits      Int                 @default(10)
+  tier         String              @default("free")
+  createdAt    DateTime            @default(now())
+  lastLoginAt  DateTime            @updatedAt
+  contacts     Contact[]
+  transactions CreditTransaction[]
+  notes        Note[]
+}
+
+model CreditTransaction {
+  id          String   @id @default(cuid())
+  userId      String
+  amount      Int
+  type        String
+  description String
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+model CreditPackage {
+  id          String  @id @default(cuid())
+  name        String
+  credits     Int
+  price       Float
+  description String
+  isPopular   Boolean @default(false)
 }
 
 model Contact {
   id        String   @id @default(cuid())
   fullName  String
   email     String?
+  address   String?
+  city      String?
+  state     String?
+  zipCode   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  userId    String?
+  cards     Card[]
+  user      User?    @relation(fields: [userId], references: [id])
   notes     Note[]
 }
 
 model Note {
-  id        String   @id @default(cuid())
-  type      String
-  occasion  String
-  content   String
+  id        String    @id @default(cuid())
+  noteType  String
+  occasion  String?
   details   String?
-  status    String   @default("draft") // draft, sent
+  content   String
+  status    String    @default("draft")
   sentAt    DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
   contactId String
-  contact   Contact  @relation(fields: [contactId], references: [id])
+  userId    String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  contact   Contact   @relation(fields: [contactId], references: [id])
+  user      User?     @relation(fields: [userId], references: [id])
 }
 
+model Card {
+  id        String   @id @default(cuid())
+  content   String
+  status    String
+  contactId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  contact   Contact  @relation(fields: [contactId], references: [id])
+}

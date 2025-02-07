@@ -1,10 +1,24 @@
 'use client'
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, JSX } from 'react';
 import { Mail, Search, Package, Star, Archive, Plus, X, Save, Wand2, Mic, MicOff, Sparkles } from 'lucide-react';
 import { validateContact } from '../utils/validation';
 import OpenAI from 'openai';
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
+import { PrismaClient } from '@prisma/client'
+import { getServerSession } from 'next-auth'
+
+const prisma = new PrismaClient()
+
+export async function dbHealthCheck() {
+  try {
+    await prisma.$connect()
+    return true
+  } catch (err) {
+    console.error('Database connection failed:', err)
+    return false
+  }
+}
 
 const formatDate = (date: Date | string | undefined) => {
   if (!date) return '-';
@@ -18,11 +32,23 @@ const formatDate = (date: Date | string | undefined) => {
 };
 
 const handwritingFonts = {
-  'casual': { name: 'Homemade Apple', class: 'font-homemade-apple' },
-  'neat': { name: 'Nothing You Could Do', class: 'font-nothing-you-could-do' },
-  'formal': { name: 'Alex Brush', class: 'font-alex-brush' },
-  'modern': { name: 'Caveat', class: 'font-caveat' }
-};
+  'casual': { 
+    name: 'Homemade Apple', 
+    class: 'font-homemade-apple font-cursive'  // Add explicit font-family class
+  },
+  'neat': { 
+    name: 'Nothing You Could Do', 
+    class: 'font-nothing-you-could-do font-cursive'
+  },
+  'formal': { 
+    name: 'Alex Brush', 
+    class: 'font-alex-brush font-cursive'
+  },
+  'modern': { 
+    name: 'Caveat', 
+    class: 'font-caveat font-cursive'
+  }
+} as const;
 
 // Add ValidationError type
 interface ValidationError {
@@ -31,7 +57,7 @@ interface ValidationError {
 }
 // Global type declarations
 interface Contact {
-  id: number;
+  id: string;
   name: string;
   group: string;
   email: string;
@@ -49,7 +75,7 @@ interface Contact {
 
 interface EditFormProps {
   editContact: Contact;
-  setEditingContact: (id: number | null) => void;
+  setEditingContact: (id: string | null) => void;
   setEditContact: (contact: Contact) => void;
   handleSaveEdit: () => void;
 }
@@ -291,12 +317,12 @@ const EditForm: React.FC<EditFormProps> = ({
   );
 };
 
-const CardManager: React.FC = () => {
+const CardManager: React.FC = (): JSX.Element => {
   const [activeView, setActiveView] = useState('dashboard');
   const [selectedContact, setSelectedContact] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const handleDeleteContact = (id: number) => {
+  const handleDeleteContact = (id: string) => {
     setContacts(contacts.filter(contact => contact.id !== id));
     if (selectedRecipient?.id === id) {
       setSelectedRecipient(null);
@@ -306,7 +332,7 @@ const CardManager: React.FC = () => {
   const [selectedRecipient, setSelectedRecipient] = useState<Contact | null>(null);
   const [isAddingContact, setIsAddingContact] = useState(false);
   const [newContact, setNewContact] = useState<Contact>({
-    id: 0,
+    id: '',  // Will be generated when saving
     name: '',
     group: '',
     email: '',
@@ -323,7 +349,7 @@ const CardManager: React.FC = () => {
   
   const [contacts, setContacts] = useState<Contact[]>([
     {
-      id: 1,
+      id: 'clq1234567890abcdef',  // Prisma ID format
       name: 'Sarah Johnson',
       group: 'Family',
       lastContact: formatDate(new Date('2024-01-01')), // Use a string date instead of Date object
@@ -339,7 +365,7 @@ const CardManager: React.FC = () => {
       phone: ''
     },
     {
-      id: 2,
+      id: 'clq2345678901bcdefg',  // Prisma ID format
       name: 'Mike Peters',
       group: 'Work',
       lastContact: '1 week ago',
@@ -355,7 +381,7 @@ const CardManager: React.FC = () => {
       phone: ''
     },
     {
-      id: 3,
+      id: 'clq3456789012cdefgh',  // Prisma ID format
       name: 'Emma Wilson',
       group: 'Friends',
       lastContact: '3 weeks ago',
@@ -396,9 +422,9 @@ const CardManager: React.FC = () => {
   });
   const [showPromptForm, setShowPromptForm] = useState(false);
 
-  const [editingContact, setEditingContact] = useState<number | null>(null);
+  const [editingContact, setEditingContact] = useState<string | null>(null);
   const [editContact, setEditContact] = useState<Contact>({
-    id: 0,
+    id: '',  // Will be filled when editing starts
     name: '',
     email: '',
     phone: '',
@@ -467,6 +493,9 @@ const CardManager: React.FC = () => {
   const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
   const [showMessageQueue, setShowMessageQueue] = useState(false);
 
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -505,6 +534,11 @@ const CardManager: React.FC = () => {
     }
   }, []);
 
+  const handleEditContact = (contact: Contact) => {
+    setEditingContact(contact.id);
+    setEditContact(contact);
+  };
+
   const handleAddContact = () => {
     const errors = validateContact(newContact);
     if (errors.length > 0) {
@@ -519,7 +553,7 @@ const CardManager: React.FC = () => {
       ));
     } else {
       // Add new contact
-      const newId = contacts.length + 1;
+      const newId = `clq${Date.now().toString(36)}${Math.random().toString(36).substr(2, 9)}`; // Generate CUID-like ID
       const contactToAdd = {
         ...newContact,
         id: newId,
@@ -531,7 +565,7 @@ const CardManager: React.FC = () => {
     
     // Reset the form
     setNewContact({
-      id: 0,
+      id: '',
       name: '',
       group: '',
       email: '',
@@ -588,73 +622,73 @@ const CardManager: React.FC = () => {
   };
 
 const generateMessage = async () => {
+  if (!selectedRecipient) {
+    setError('Please select a recipient first');
+    return;
+  }
+
+  const generatedMessage = await handleAIAssist('generate', '');
+  if (generatedMessage) {
+    setMessage(generatedMessage);
+    setShowPromptForm(false);
+  }
+};
+
+// Single, consolidated handleAIAssist function
+const handleAIAssist = async (instruction: string, existingMessage?: string) => {
   setIsGenerating(true);
+  setError(null);
+  
   try {
-    const prompt = message 
-      ? `Rewrite this message: "${message}"
-         Make it more ${messagePrompt.tone} and suitable for a ${messagePrompt.occasion} card to a ${messagePrompt.relationship}.
-         Additional context: ${messagePrompt.specificDetails}`
-      : `Write a ${messagePrompt.tone} message for a ${messagePrompt.occasion} card to a ${messagePrompt.relationship}. 
-         Additional details: ${messagePrompt.specificDetails}`;
+    let prompt;
+    if (instruction === 'generate') {
+      prompt = `Write a ${messagePrompt.tone} message for a ${messagePrompt.occasion} card to a ${messagePrompt.relationship}. 
+              Additional details: ${messagePrompt.specificDetails}`;
+    } else {
+      prompt = `${instruction}: "${existingMessage || message}"
+        Please maintain the core message while ${instruction === 'make it shorter' 
+          ? 'being more concise' 
+          : 'adding more detail and expression'}.`;
+    }
 
     const response = await fetch('/api/generate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ 
+        prompt,
+        contactId: selectedRecipient?.id 
+      }),
     });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to generate/improve message');
+    }
 
     const data = await response.json();
-    if (data.error) throw new Error(data.error);
-    
-    setMessage(data.message || '');
-  } catch (error) {
-    console.error('Error generating message:', error);
+    return data.message;
+  } catch (err) {
+    setError(err instanceof Error ? err.message : 'Failed to process message');
+    return null;
+  } finally {
+    setIsGenerating(false);
   }
-  setIsGenerating(false);
-  setShowPromptForm(false);
 };
 
-const improveExistingMessage = async (instruction: string) => {
-  setIsGenerating(true);
-  try {
-    const prompt = `Improve this card message: "${message}" 
-      Instructions: ${instruction}
-      Make it more ${messagePrompt.tone}`;
-
-    const response = await fetch('/api/generate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ prompt }),
-    });
-
-    const data = await response.json();
-    if (data.error) throw new Error(data.error);
-    
-    setMessage(data.message || '');
-  } catch (error) {
-    console.error('Error improving message:', error);
+// Improve existing message function
+const improveExistingMessage = async (instruction: 'make it shorter' | 'make it longer') => {
+  if (!message || !selectedRecipient) {
+    setError('Please write a message and select a recipient first');
+    return;
   }
-  setIsGenerating(false);
-};
 
-  const handleEditContact = (contact: Contact) => {
-    setEditingContact(contact.id);
-    setEditContact({
-      ...contact,
-      address: {
-        street: contact.address?.street || '',
-        unit: contact.address?.unit || '',
-        city: contact.address?.city || '',
-        state: contact.address?.state || '',
-        zipCode: contact.address?.zipCode || '',
-        country: contact.address?.country || 'United States'
-      }
-    });
-  };
+  const improvedMessage = await handleAIAssist(instruction, message);
+  if (improvedMessage) {
+    setMessage(improvedMessage);
+  }
+};
 
   const handleSaveEdit = () => {
     const errors = validateContact(editContact);
@@ -669,7 +703,7 @@ const improveExistingMessage = async (instruction: string) => {
       )
     );
 
-    // Update any drafts that reference this contact
+    // Update drafts and message queue references
     setDrafts(prevDrafts => 
       prevDrafts.map(draft => {
         if (draft.recipient === editContact.name) {
@@ -689,7 +723,6 @@ const improveExistingMessage = async (instruction: string) => {
       })
     );
 
-    // Update message queue items that reference this contact
     setMessageQueue(prevQueue =>
       prevQueue.map(item => {
         if (item.recipient.id === editContact.id) {
@@ -702,10 +735,10 @@ const improveExistingMessage = async (instruction: string) => {
       })
     );
 
-    // Reset the editing state
+    // Reset editing state
     setEditingContact(null);
     setEditContact({
-      id: 0,
+      id: '',
       name: '',
       email: '',
       phone: '',
@@ -840,7 +873,7 @@ const improveExistingMessage = async (instruction: string) => {
       .map((item) => ({
         id: Math.random().toString(36).substr(2, 9),
         recipient: item.contact || {
-          id: Date.now(),
+          id: Date.now().toString(),
           name: item.fromPerson,
           group: 'Other',
           email: '',
@@ -915,6 +948,53 @@ const improveExistingMessage = async (instruction: string) => {
     setSelectedRecipient(null);
     setSearchTerm('');
     setShowMessageQueue(true);
+  };
+
+  const handleDeleteDraft = (draftId: number) => {
+    setDrafts(drafts.filter(draft => draft.id !== draftId));
+  };
+
+  const exportDraftsToCSV = () => {
+    // Define CSV headers
+    const headers = [
+      'Recipient',
+      'Street Address',
+      'City',
+      'State',
+      'ZIP Code',
+      'Note Type',
+      'Note',
+      'Created At'
+    ];
+
+    // Convert drafts to CSV rows
+    const rows = drafts.map(draft => [
+      draft.recipient,
+      draft.address?.street || '',
+      draft.address?.city || '',
+      draft.address?.state || '',
+      draft.address?.zipCode || '',
+      draft.noteType,
+      draft.note,
+      draft.createdAt
+    ]);
+
+    // Combine headers and rows
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    // Create and trigger download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `draft-cards-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -1069,6 +1149,17 @@ const improveExistingMessage = async (instruction: string) => {
 
         {activeView === 'sent' && (
           <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-neutral-200 flex justify-between items-center">
+              <h2 className="text-lg font-medium text-gray-900">Draft Cards</h2>
+              <button
+                onClick={exportDraftsToCSV}
+                className={`${baseButtonStyle} ${buttonStyles.outline}`}
+                disabled={drafts.length === 0}
+              >
+                <Package className="w-4 h-4" />
+                Export to CSV
+              </button>
+            </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-neutral-200">
                 <thead className="bg-neutral-50">
@@ -1080,6 +1171,7 @@ const improveExistingMessage = async (instruction: string) => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Zip Code</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Note Type</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Note</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-neutral-200">
@@ -1092,6 +1184,15 @@ const improveExistingMessage = async (instruction: string) => {
                       <td className="px-6 py-4 whitespace-nowrap">{draft.address?.zipCode || '-'}</td>
                       <td className="px-6 py-4 whitespace-nowrap">{draft.noteType}</td>
                       <td className="px-6 py-4 max-w-md overflow-hidden text-ellipsis">{draft.note}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <button
+                          onClick={() => handleDeleteDraft(draft.id)}
+                          className={`${baseButtonStyle} !py-1 !px-3 text-sm ${buttonStyles.destructive}`}
+                        >
+                          <X className="w-4 h-4 mr-1" />
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1113,7 +1214,7 @@ const improveExistingMessage = async (instruction: string) => {
                       setIsAddingContact(false);
                       setIsEditing(false);
                       setNewContact({
-                        id: 0,
+                        id: '',
                         name: '', 
                         group: '', 
                         email: '',
@@ -1252,7 +1353,7 @@ const improveExistingMessage = async (instruction: string) => {
                         setIsAddingContact(false);
                         setIsEditing(false);
                         setNewContact({
-                          id: 0,
+                          id: '',
                           name: '', 
                           group: '', 
                           email: '',
@@ -1545,17 +1646,19 @@ const improveExistingMessage = async (instruction: string) => {
                 <div className="flex justify-between items-center mb-2">
                   <label className="block text-sm font-medium text-gray-900">Message</label>
                   <button
-                    onClick={() => setShowPromptForm(true)}
+                    onClick={() => message ? setShowPromptForm(true) : generateMessage()}
                     className={`${baseButtonStyle} ${buttonStyles.premium} !p-2`}
+                    disabled={isGenerating}
                   >
-                    <Wand2 className="w-4 h-4" /> {message ? 'Improve with AI' : 'AI Assist'}
+                    <Wand2 className="w-4 h-4" />
+                    {isGenerating ? 'Processing...' : message ? 'Improve with AI' : 'AI Assist'}
                   </button>
                 </div>
                 
                 {showPromptForm && (
                   <div className="mb-4 p-4 border rounded-lg bg-white space-y-3">
                     <div className="flex justify-between items-center">
-                      <h4 className="font-medium">AI Message Generator</h4>
+                      <h4 className="font-medium">AI Message Assistant</h4>
                       <button
                         onClick={() => setShowPromptForm(false)}
                         className="text-gray-500 hover:text-gray-700"
@@ -1563,43 +1666,82 @@ const improveExistingMessage = async (instruction: string) => {
                         <X className="w-4 h-4" />
                       </button>
                     </div>
-                    <select
-                      value={messagePrompt.tone}
-                      onChange={(e) => setMessagePrompt({...messagePrompt, tone: e.target.value})}
-                      className="w-full p-2 border rounded"
-                    >
-                      <option value="formal">Formal</option>
-                      <option value="casual">Casual</option>
-                      <option value="warm">Warm</option>
-                      <option value="professional">Professional</option>
-                    </select>
-                    <input
-                      type="text"
-                      placeholder="Occasion (e.g., birthday, thank you, congratulations)"
-                      value={messagePrompt.occasion}
-                      onChange={(e) => setMessagePrompt({...messagePrompt, occasion: e.target.value})}
-                      className="w-full p-2 border rounded"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Relationship (e.g., close friend, colleague, family member)"
-                      value={messagePrompt.relationship}
-                      onChange={(e) => setMessagePrompt({...messagePrompt, relationship: e.target.value})}
-                      className="w-full p-2 border rounded"
-                    />
-                    <textarea
-                      placeholder="Additional details or specific points to include"
-                      value={messagePrompt.specificDetails}
-                      onChange={(e) => setMessagePrompt({...messagePrompt, specificDetails: e.target.value})}
-                      className="w-full p-2 border rounded h-20"
-                    />
-                    <button
-                      onClick={generateMessage}
-                      disabled={isGenerating}
-                      className="w-full py-2 bg-primary-500 text-white rounded hover:bg-primary-600 disabled:opacity-50"
-                    >
-                      {isGenerating ? 'Generating...' : message ? 'Regenerate Message' : 'Generate Message'}
-                    </button>
+                    
+                    {message ? (
+                      // Show improvement options if there's an existing message
+                      <div className="space-y-4">
+                        <h5 className="font-medium text-sm text-gray-700">How would you like to improve this message?</h5>
+                        <div className="grid grid-cols-2 gap-4">
+                          <button
+                            onClick={() => improveExistingMessage('make it shorter')}
+                            className={`${baseButtonStyle} ${buttonStyles.outline}`}
+                            disabled={isGenerating}
+                          >
+                            Make it Shorter
+                          </button>
+                          <button
+                            onClick={() => improveExistingMessage('make it longer')}
+                            className={`${baseButtonStyle} ${buttonStyles.outline}`}
+                            disabled={isGenerating}
+                          >
+                            Make it Longer
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      // Show the original prompt form for generating new messages
+                      <div className="space-y-4">
+                        <select
+                          value={messagePrompt.tone}
+                          onChange={(e) => setMessagePrompt({...messagePrompt, tone: e.target.value})}
+                          className="w-full p-2 border rounded"
+                        >
+                          <option value="formal">Formal</option>
+                          <option value="casual">Casual</option>
+                          <option value="warm">Warm</option>
+                          <option value="professional">Professional</option>
+                        </select>
+                        <input
+                          type="text"
+                          placeholder="Occasion (e.g., birthday, thank you, congratulations)"
+                          value={messagePrompt.occasion}
+                          onChange={(e) => setMessagePrompt({...messagePrompt, occasion: e.target.value})}
+                          className="w-full p-2 border rounded"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Relationship (e.g., close friend, colleague, family member)"
+                          value={messagePrompt.relationship}
+                          onChange={(e) => setMessagePrompt({...messagePrompt, relationship: e.target.value})}
+                          className="w-full p-2 border rounded"
+                        />
+                        <textarea
+                          placeholder="Additional details or specific points to include"
+                          value={messagePrompt.specificDetails}
+                          onChange={(e) => setMessagePrompt({...messagePrompt, specificDetails: e.target.value})}
+                          className="w-full p-2 border rounded h-20"
+                        />
+                        <button
+                          onClick={generateMessage}
+                          disabled={isGenerating}
+                          className="w-full py-2 bg-primary-500 text-white rounded hover:bg-primary-600 disabled:opacity-50"
+                        >
+                          {isGenerating ? 'Generating...' : message ? 'Regenerate Message' : 'Generate Message'}
+                        </button>
+                      </div>
+                    )}
+                    
+                    {isGenerating && (
+                      <div className="text-center text-sm text-gray-600">
+                        Processing your request...
+                      </div>
+                    )}
+                    
+                    {error && (
+                      <div className="text-red-500 text-sm">
+                        {error}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1638,22 +1780,25 @@ const improveExistingMessage = async (instruction: string) => {
                       {message && (
                         <div className="flex gap-2">
                           <button
-                            onClick={() => improveExistingMessage('Make it more concise')}
-                            className="text-primary-600 hover:text-primary-700"
-                            disabled={isGenerating}
+                            onClick={() => improveExistingMessage('make it shorter')}
+                            className="text-primary-600 hover:text-primary-700 disabled:opacity-50"
+                            disabled={isGenerating || !selectedRecipient}
                           >
-                            Make Shorter
+                            {isGenerating ? 'Improving...' : 'Make Shorter'}
                           </button>
                           <button
-                            onClick={() => improveExistingMessage('Make it more detailed and expressive')}
-                            className="text-primary-600 hover:text-primary-700"
-                            disabled={isGenerating}
+                            onClick={() => improveExistingMessage('make it longer')}
+                            className="text-primary-600 hover:text-primary-700 disabled:opacity-50"
+                            disabled={isGenerating || !selectedRecipient}
                           >
-                            Make Longer
+                            {isGenerating ? 'Improving...' : 'Make Longer'}
                           </button>
                         </div>
                       )}
                     </div>
+                    {error && (
+                      <p className="text-red-500 text-sm mt-2">{error}</p>
+                    )}
 
                     {/* Action buttons - Add this section */}
                     {selectedRecipient && message && (
@@ -1737,6 +1882,7 @@ const improveExistingMessage = async (instruction: string) => {
                       bg-gradient-to-r from-gray-700 to-gray-800 
                       bg-clip-text text-transparent
                       transition-opacity duration-300
+                      !font-normal
                     `}>
                       {message || (
                         <span className="opacity-40 select-none">
@@ -1816,9 +1962,10 @@ const improveExistingMessage = async (instruction: string) => {
                   <div className="max-h-96 overflow-y-auto">
                     {thankYouItems.map((item) => (
                       <div key={item.id} className="p-4 border rounded mb-2">
-                        <p><strong>To:</strong> {item.fromPerson}</p>
-                        <p><strong>Contact Found:</strong> {item.contact ? '✓' : '✗'}</p>
+                        <p><strong>From:</strong> {item.fromPerson}</p>
                         <p><strong>Gift/Reason:</strong> {item.giftOrReason}</p>
+                        {item.occasion && <p><strong>Occasion:</strong> {item.occasion}</p>}
+                        <p><strong>Contact Match:</strong> {item.contact?.name || 'No match found'}</p>
                       </div>
                     ))}
                   </div>
@@ -1827,25 +1974,17 @@ const improveExistingMessage = async (instruction: string) => {
 
               {bulkImportStep === 4 && (
                 <div className="space-y-4">
-                  <p>Review messages before adding to queue:</p>
+                  <p>Review generated messages:</p>
                   <div className="max-h-96 overflow-y-auto">
                     {thankYouItems.map((item) => (
                       <div key={item.id} className="p-4 border rounded mb-2">
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <p><strong>To:</strong> {item.fromPerson}</p>
-                            <p><strong>Gift/Reason:</strong> {item.giftOrReason}</p>
-                            {item.occasion && <p><strong>Occasion:</strong> {item.occasion}</p>}
+                        <p><strong>To:</strong> {item.fromPerson}</p>
+                        <p><strong>Gift/Reason:</strong> {item.giftOrReason}</p>
+                        {item.suggestedMessage && (
+                          <div className="mt-2 p-3 bg-gray-50 rounded">
+                            {item.suggestedMessage}
                           </div>
-                          <span className={`px-2 py-1 rounded text-sm ${
-                            item.contact ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                          }`}>
-                            {item.contact ? 'Contact Matched' : 'New Contact'}
-                          </span>
-                        </div>
-                        <div className="mt-3 p-3 bg-neutral-50 rounded whitespace-pre-wrap">
-                          {item.suggestedMessage}
-                        </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1853,7 +1992,7 @@ const improveExistingMessage = async (instruction: string) => {
               )}
             </div>
 
-            <div className="px-6 py-4 border-t bg-neutral-50 flex justify-between">
+            <div className="px-6 py-4 border-t bg-gray-50 flex justify-between items-center">
               <button
                 onClick={() => {
                   setShowBulkImport(false);
@@ -1889,9 +2028,9 @@ const improveExistingMessage = async (instruction: string) => {
                   </button>
                 )}
                 {bulkImportStep === 4 && (
-      <button
-        onClick={finalizeAndSave}
-        className={`${baseButtonStyle} ${buttonStyles.success}`}
+                  <button
+                    onClick={finalizeAndSave}
+                    className={`${baseButtonStyle} ${buttonStyles.success}`}
                   >
                     Add to Message Queue
                   </button>
@@ -1905,5 +2044,62 @@ const improveExistingMessage = async (instruction: string) => {
     </div>
   );
 };
+
+import { Session } from "next-auth";
+
+export const authConfig = {
+  providers: [
+    // Configure auth providers
+  ],
+  callbacks: {
+    async session({ session, token }: { session: Session; token: any }) {
+      return {
+        ...session,
+        user: {
+          ...session.user,
+          id: token.sub
+        }
+      }
+    }
+  }
+}
+
+// 3. Route Protection
+import { withAuth } from 'next-auth/middleware'
+
+export const authMiddleware = withAuth({
+  callbacks: {
+    authorized: ({ token }) => !!token
+  }
+});
+
+export const config = {
+  matcher: ['/dashboard/:path*', '/api/:path*']
+}
+
+// 4. Error Boundary Component
+'use client'
+
+export function ErrorBoundary({
+  error,
+  reset,
+}: {
+  error: Error
+  reset: () => void
+}) {
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="text-center">
+        <h2>Something went wrong!</h2>
+        <button
+          onClick={() => reset()}
+          className="mt-4 rounded-md bg-blue-500 px-4 py-2 text-white"
+        >
+          Try again
+        </button>
+      </div>
+    </div>
+  )
+}
 
 export default CardManager;

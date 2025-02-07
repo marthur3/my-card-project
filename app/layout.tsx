@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Inter, Homemade_Apple, Nothing_You_Could_Do, Alex_Brush, Caveat } from 'next/font/google';
+import { headers } from 'next/headers';
+import { NextAuthProvider } from "@/providers/auth";
 
 const inter = Inter({
   subsets: ['latin'],
@@ -43,7 +45,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${homemadeApple.variable} ${nothingYouCouldDo.variable} ${alexBrush.variable} ${caveat.variable}`}>
-        {children}
+        <NextAuthProvider>{children}</NextAuthProvider>
       </body>
     </html>
   );
